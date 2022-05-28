@@ -149,6 +149,59 @@ class SupportStrTest extends TestCase
         $this->assertFalse(Str::endsWith('你好', 'a'));
     }
 
+    public function testStrExcerpt()
+    {
+        $this->assertSame('...is a beautiful morn...', Str::excerpt('This is a beautiful morning', 'beautiful', ['radius' => 5]));
+        $this->assertSame('This is a...', Str::excerpt('This is a beautiful morning', 'this', ['radius' => 5]));
+        $this->assertSame('...iful morning', Str::excerpt('This is a beautiful morning', 'morning', ['radius' => 5]));
+        $this->assertNull(Str::excerpt('This is a beautiful morning', 'day'));
+        $this->assertSame('...is a beautiful! mor...', Str::excerpt('This is a beautiful! morning', 'Beautiful', ['radius' => 5]));
+        $this->assertSame('...is a beautiful? mor...', Str::excerpt('This is a beautiful? morning', 'beautiful', ['radius' => 5]));
+        $this->assertSame('', Str::excerpt('', '', ['radius' => 0]));
+        $this->assertSame('a', Str::excerpt('a', 'a', ['radius' => 0]));
+        $this->assertSame('...b...', Str::excerpt('abc', 'B', ['radius' => 0]));
+        $this->assertSame('abc', Str::excerpt('abc', 'b', ['radius' => 1]));
+        $this->assertSame('abc...', Str::excerpt('abcd', 'b', ['radius' => 1]));
+        $this->assertSame('...abc', Str::excerpt('zabc', 'b', ['radius' => 1]));
+        $this->assertSame('...abc...', Str::excerpt('zabcd', 'b', ['radius' => 1]));
+        $this->assertSame('zabcd', Str::excerpt('zabcd', 'b', ['radius' => 2]));
+        $this->assertSame('zabcd', Str::excerpt('  zabcd  ', 'b', ['radius' => 4]));
+        $this->assertSame('...abc...', Str::excerpt('z  abc  d', 'b', ['radius' => 1]));
+        $this->assertSame('[...]is a beautiful morn[...]', Str::excerpt('This is a beautiful morning', 'beautiful', ['omission' => '[...]', 'radius' => 5]));
+        $this->assertSame(
+              'This is the ultimate supercalifragilisticexpialidoceous very looooooooooooooooooong looooooooooooong beautiful morning with amazing sunshine and awesome tempera[...]',
+              Str::excerpt('This is the ultimate supercalifragilisticexpialidoceous very looooooooooooooooooong looooooooooooong beautiful morning with amazing sunshine and awesome temperatures. So what are you gonna do about it?', 'very',
+              ['omission' => '[...]'],
+        ));
+
+        $this->assertSame('...y...', Str::excerpt('taylor', 'y', ['radius' => 0]));
+        $this->assertSame('...ayl...', Str::excerpt('taylor', 'Y', ['radius' => 1]));
+        $this->assertSame('<div> The article description </div>', Str::excerpt('<div> The article description </div>', 'article'));
+        $this->assertSame('...The article desc...', Str::excerpt('<div> The article description </div>', 'article', ['radius' => 5]));
+        $this->assertSame('The article description', Str::excerpt(strip_tags('<div> The article description </div>'), 'article'));
+        $this->assertSame('', Str::excerpt(null));
+        $this->assertSame('', Str::excerpt(''));
+        $this->assertSame('', Str::excerpt(null, ''));
+        $this->assertSame('T...', Str::excerpt('The article description', null, ['radius' => 1]));
+        $this->assertSame('The arti...', Str::excerpt('The article description', '', ['radius' => 8]));
+        $this->assertSame('', Str::excerpt(' '));
+        $this->assertSame('The arti...', Str::excerpt('The article description', ' ', ['radius' => 4]));
+        $this->assertSame('...cle description', Str::excerpt('The article description', 'description', ['radius' => 4]));
+        $this->assertSame('T...', Str::excerpt('The article description', 'T', ['radius' => 0]));
+        $this->assertSame('What i?', Str::excerpt('What is the article?', 'What', ['radius' => 2, 'omission' => '?']));
+
+        $this->assertSame('...ö - 二 sān 大åè...', Str::excerpt('åèö - 二 sān 大åèö', '二 sān', ['radius' => 4]));
+        $this->assertSame('åèö - 二...', Str::excerpt('åèö - 二 sān 大åèö', 'åèö', ['radius' => 4]));
+        $this->assertSame('åèö - 二 sān 大åèö', Str::excerpt('åèö - 二 sān 大åèö', 'åèö - 二 sān 大åèö', ['radius' => 4]));
+        $this->assertSame('åèö - 二 sān 大åèö', Str::excerpt('åèö - 二 sān 大åèö', 'åèö - 二 sān 大åèö', ['radius' => 4]));
+        $this->assertSame('...༼...', Str::excerpt('㏗༼㏗', '༼', ['radius' => 0]));
+        $this->assertSame('...༼...', Str::excerpt('㏗༼㏗', '༼', ['radius' => 0]));
+        $this->assertSame('...ocê e...', Str::excerpt('Como você está', 'ê', ['radius' => 2]));
+        $this->assertSame('...ocê e...', Str::excerpt('Como você está', 'Ê', ['radius' => 2]));
+        $this->assertSame('João...', Str::excerpt('João Antônio ', 'jo', ['radius' => 2]));
+        $this->assertSame('João Antô...', Str::excerpt('João Antônio', 'JOÃO', ['radius' => 5]));
+    }
+
     public function testStrBefore()
     {
         $this->assertSame('han', Str::before('hannah', 'nah'));
@@ -187,6 +240,21 @@ class SupportStrTest extends TestCase
         $this->assertSame('a]ab[b', Str::between('[a]ab[b]', '[', ']'));
         $this->assertSame('foo', Str::between('foofoobar', 'foo', 'bar'));
         $this->assertSame('bar', Str::between('foobarbar', 'foo', 'bar'));
+    }
+
+    public function testStrBetweenFirst()
+    {
+        $this->assertSame('abc', Str::betweenFirst('abc', '', 'c'));
+        $this->assertSame('abc', Str::betweenFirst('abc', 'a', ''));
+        $this->assertSame('abc', Str::betweenFirst('abc', '', ''));
+        $this->assertSame('b', Str::betweenFirst('abc', 'a', 'c'));
+        $this->assertSame('b', Str::betweenFirst('dddabc', 'a', 'c'));
+        $this->assertSame('b', Str::betweenFirst('abcddd', 'a', 'c'));
+        $this->assertSame('b', Str::betweenFirst('dddabcddd', 'a', 'c'));
+        $this->assertSame('nn', Str::betweenFirst('hannah', 'ha', 'ah'));
+        $this->assertSame('a', Str::betweenFirst('[a]ab[b]', '[', ']'));
+        $this->assertSame('foo', Str::betweenFirst('foofoobar', 'foo', 'bar'));
+        $this->assertSame('', Str::betweenFirst('foobarbar', 'foo', 'bar'));
     }
 
     public function testStrAfter()
@@ -470,6 +538,24 @@ class SupportStrTest extends TestCase
         $this->assertSame('żółtałódka', Str::snake('ŻółtaŁódka'));
     }
 
+    public function testSquish()
+    {
+        $this->assertSame('laravel php framework', Str::squish(' laravel   php  framework '));
+        $this->assertSame('laravel php framework', Str::squish("laravel\t\tphp\n\nframework"));
+        $this->assertSame('laravel php framework', Str::squish('
+            laravel
+            php
+            framework
+        '));
+        $this->assertSame('laravel php framework', Str::squish('   laravel   php   framework   '));
+        $this->assertSame('123', Str::squish('   123    '));
+        $this->assertSame('だ', Str::squish('だ'));
+        $this->assertSame('ム', Str::squish('ム'));
+        $this->assertSame('だ', Str::squish('   だ    '));
+        $this->assertSame('ム', Str::squish('   ム    '));
+        $this->assertSame('laravel php framework', Str::squish('laravelㅤㅤㅤphpㅤframework'));
+    }
+
     public function testStudly()
     {
         $this->assertSame('LaravelPHPFramework', Str::studly('laravel_p_h_p_framework'));
@@ -506,6 +592,19 @@ class SupportStrTest extends TestCase
 
         $this->assertSame('这是一***', Str::mask('这是一段中文', '*', 3));
         $this->assertSame('**一段中文', Str::mask('这是一段中文', '*', 0, 2));
+
+        $this->assertSame('ma*n@email.com', Str::mask('maan@email.com', '*', 2, 1));
+        $this->assertSame('ma***email.com', Str::mask('maan@email.com', '*', 2, 3));
+        $this->assertSame('ma************', Str::mask('maan@email.com', '*', 2));
+
+        $this->assertSame('mari*@email.com', Str::mask('maria@email.com', '*', 4, 1));
+        $this->assertSame('tamar*@email.com', Str::mask('tamara@email.com', '*', 5, 1));
+
+        $this->assertSame('*aria@email.com', Str::mask('maria@email.com', '*', 0, 1));
+        $this->assertSame('maria@email.co*', Str::mask('maria@email.com', '*', -1, 1));
+        $this->assertSame('maria@email.co*', Str::mask('maria@email.com', '*', -1));
+        $this->assertSame('***************', Str::mask('maria@email.com', '*', -15));
+        $this->assertSame('***************', Str::mask('maria@email.com', '*', 0));
     }
 
     public function testMatch()
@@ -570,6 +669,14 @@ class SupportStrTest extends TestCase
         $this->assertSame('Laravel – The PHP Framework for Web Artisans', Str::substrReplace('Laravel Framework', '– The PHP Framework for Web Artisans', 8));
     }
 
+    public function testLcfirst()
+    {
+        $this->assertSame('laravel', Str::lcfirst('Laravel'));
+        $this->assertSame('laravel framework', Str::lcfirst('Laravel framework'));
+        $this->assertSame('мама', Str::lcfirst('Мама'));
+        $this->assertSame('мама мыла раму', Str::lcfirst('Мама мыла раму'));
+    }
+
     public function testUcfirst()
     {
         $this->assertSame('Laravel', Str::ucfirst('laravel'));
@@ -607,18 +714,21 @@ class SupportStrTest extends TestCase
     {
         $this->assertSame('__Alien___', Str::padBoth('Alien', 10, '_'));
         $this->assertSame('  Alien   ', Str::padBoth('Alien', 10));
+        $this->assertSame('  ❤MultiByte☆   ', Str::padBoth('❤MultiByte☆', 16));
     }
 
     public function testPadLeft()
     {
         $this->assertSame('-=-=-Alien', Str::padLeft('Alien', 10, '-='));
         $this->assertSame('     Alien', Str::padLeft('Alien', 10));
+        $this->assertSame('     ❤MultiByte☆', Str::padLeft('❤MultiByte☆', 16));
     }
 
     public function testPadRight()
     {
         $this->assertSame('Alien-----', Str::padRight('Alien', 10, '-'));
         $this->assertSame('Alien     ', Str::padRight('Alien', 10));
+        $this->assertSame('❤MultiByte☆     ', Str::padRight('❤MultiByte☆', 16));
     }
 
     public function testSwapKeywords(): void
@@ -643,6 +753,15 @@ class SupportStrTest extends TestCase
     {
         $this->assertEquals(2, Str::wordCount('Hello, world!'));
         $this->assertEquals(10, Str::wordCount('Hi, this is my first contribution to the Laravel framework.'));
+
+        $this->assertEquals(0, Str::wordCount('мама'));
+        $this->assertEquals(0, Str::wordCount('мама мыла раму'));
+
+        $this->assertEquals(1, Str::wordCount('мама', 'абвгдеёжзийклмнопрстуфхцчшщъыьэюяАБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ'));
+        $this->assertEquals(3, Str::wordCount('мама мыла раму', 'абвгдеёжзийклмнопрстуфхцчшщъыьэюяАБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ'));
+
+        $this->assertEquals(1, Str::wordCount('МАМА', 'абвгдеёжзийклмнопрстуфхцчшщъыьэюяАБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ'));
+        $this->assertEquals(3, Str::wordCount('МАМА МЫЛА РАМУ', 'абвгдеёжзийклмнопрстуфхцчшщъыьэюяАБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ'));
     }
 
     public function validUuidList()
