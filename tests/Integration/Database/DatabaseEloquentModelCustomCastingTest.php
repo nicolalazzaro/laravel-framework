@@ -2,6 +2,7 @@
 
 namespace Illuminate\Tests\Integration\Database;
 
+use Exception;
 use Illuminate\Contracts\Database\Eloquent\Castable;
 use Illuminate\Contracts\Database\Eloquent\CastsAttributes;
 use Illuminate\Contracts\Database\Eloquent\CastsInboundAttributes;
@@ -303,6 +304,8 @@ class TestEloquentModelWithCustomCast extends Model
 
 class HashCaster implements CastsInboundAttributes
 {
+    protected $algorithm;
+
     public function __construct($algorithm = 'sha256')
     {
         $this->algorithm = $algorithm;
@@ -392,7 +395,7 @@ class JsonSettingsCaster implements CastsAttributes
         }
 
         if (! $value instanceof Settings) {
-            throw new \Exception("Attribute `{$key}` with JsonSettingsCaster should be a Settings object");
+            throw new Exception("Attribute `{$key}` with JsonSettingsCaster should be a Settings object");
         }
 
         return $value->toJson();

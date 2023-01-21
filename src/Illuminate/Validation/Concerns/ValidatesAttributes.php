@@ -2,6 +2,8 @@
 
 namespace Illuminate\Validation\Concerns;
 
+use Brick\Math\BigDecimal;
+use Brick\Math\Exception\MathException as BrickMathException;
 use DateTime;
 use DateTimeInterface;
 use Egulias\EmailValidator\EmailValidator;
@@ -13,6 +15,7 @@ use Egulias\EmailValidator\Validation\RFCValidation;
 use Exception;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Exceptions\MathException;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rules\Exists;
@@ -117,13 +120,41 @@ trait ValidatesAttributes
 
         if ($url = parse_url($value, PHP_URL_HOST)) {
             try {
-                return count(dns_get_record($url.'.', DNS_A | DNS_AAAA)) > 0;
+                $records = $this->getDnsRecords($url.'.', DNS_A | DNS_AAAA);
+
+                if (is_array($records) && count($records) > 0) {
+                    return true;
+                }
             } catch (Exception $e) {
                 return false;
             }
         }
 
         return false;
+    }
+
+    /**
+     * Get the DNS records for the given hostname.
+     *
+     * @param  string  $hostname
+     * @param  int  $type
+     * @return array|false
+     */
+    protected function getDnsRecords($hostname, $type)
+    {
+        return dns_get_record($hostname, $type);
+    }
+
+    /**
+     * Validate that an attribute is 7 bit ASCII.
+     *
+     * @param  string  $attribute
+     * @param  mixed  $value
+     * @return bool
+     */
+    public function validateAscii($attribute, $value)
+    {
+        return Str::isAscii($value);
     }
 
     /**
@@ -271,7 +302,7 @@ trait ValidatesAttributes
             $secondDate = $this->getDateTimeWithOptionalFormat($format, $second);
         }
 
-        return ($firstDate && $secondDate) && ($this->compare($firstDate, $secondDate, $operator));
+        return ($firstDate && $secondDate) && $this->compare($firstDate, $secondDate, $operator);
     }
 
     /**
@@ -527,6 +558,36 @@ trait ValidatesAttributes
     }
 
     /**
+     * Validate that an attribute has a given number of decimal places.
+     *
+     * @param  string  $attribute
+     * @param  mixed  $value
+     * @param  array<int, int|string>  $parameters
+     * @return bool
+     */
+    public function validateDecimal($attribute, $value, $parameters)
+    {
+        if (! $this->validateNumeric($attribute, $value)) {
+            return false;
+        }
+
+        $this->requireParameterCount(1, $parameters, 'decimal');
+
+        $matches = [];
+
+        preg_match('/^[+-]?\d*.(\d*)$/', $value, $matches);
+
+        $decimals = strlen(end($matches));
+
+        if (! isset($parameters[1])) {
+            return $decimals == $parameters[0];
+        }
+
+        return $decimals >= $parameters[0] &&
+               $decimals <= $parameters[1];
+    }
+
+    /**
      * Validate that an attribute is different from another attribute.
      *
      * @param  string  $attribute
@@ -733,22 +794,14 @@ trait ValidatesAttributes
 
         $validations = collect($parameters)
             ->unique()
-            ->map(function ($validation) {
-                if ($validation === 'rfc') {
-                    return new RFCValidation;
-                } elseif ($validation === 'strict') {
-                    return new NoRFCWarningsValidation;
-                } elseif ($validation === 'dns') {
-                    return new DNSCheckValidation;
-                } elseif ($validation === 'spoof') {
-                    return new SpoofCheckValidation;
-                } elseif ($validation === 'filter') {
-                    return new FilterEmailValidation;
-                } elseif ($validation === 'filter_unicode') {
-                    return FilterEmailValidation::unicode();
-                } elseif (is_string($validation) && class_exists($validation)) {
-                    return $this->container->make($validation);
-                }
+            ->map(fn ($validation) => match (true) {
+                $validation === 'strict' => new NoRFCWarningsValidation(),
+                $validation === 'dns' => new DNSCheckValidation(),
+                $validation === 'spoof' => new SpoofCheckValidation(),
+                $validation === 'filter' => new FilterEmailValidation(),
+                $validation === 'filter_unicode' => FilterEmailValidation::unicode(),
+                is_string($validation) && class_exists($validation) => $this->container->make($validation),
+                default => new RFCValidation(),
             })
             ->values()
             ->all() ?: [new RFCValidation];
@@ -1151,6 +1204,32 @@ trait ValidatesAttributes
     }
 
     /**
+     * Validate that an attribute is lowercase.
+     *
+     * @param  string  $attribute
+     * @param  mixed  $value
+     * @param  array<int, int|string>  $parameters
+     * @return bool
+     */
+    public function validateLowercase($attribute, $value, $parameters)
+    {
+        return Str::lower($value) === $value;
+    }
+
+    /**
+     * Validate that an attribute is uppercase.
+     *
+     * @param  string  $attribute
+     * @param  mixed  $value
+     * @param  array<int, int|string>  $parameters
+     * @return bool
+     */
+    public function validateUppercase($attribute, $value, $parameters)
+    {
+        return Str::upper($value) === $value;
+    }
+
+    /**
      * Validate the MIME type of a file is an image MIME type.
      *
      * @param  string  $attribute
@@ -1310,6 +1389,23 @@ trait ValidatesAttributes
     }
 
     /**
+     * Validate that an attribute has a maximum number of digits.
+     *
+     * @param  string  $attribute
+     * @param  mixed  $value
+     * @param  array<int, int|string>  $parameters
+     * @return bool
+     */
+    public function validateMaxDigits($attribute, $value, $parameters)
+    {
+        $this->requireParameterCount(1, $parameters, 'max');
+
+        $length = strlen((string) $value);
+
+        return ! preg_match('/[^0-9]/', $value) && $length <= $parameters[0];
+    }
+
+    /**
      * Validate the guessed extension of a file upload is in a set of file extensions.
      *
      * @param  string  $attribute
@@ -1371,7 +1467,7 @@ trait ValidatesAttributes
         }
 
         $phpExtensions = [
-            'php', 'php3', 'php4', 'php5', 'phtml', 'phar',
+            'php', 'php3', 'php4', 'php5', 'php7', 'php8', 'phtml', 'phar',
         ];
 
         return ($value instanceof UploadedFile)
@@ -1395,6 +1491,108 @@ trait ValidatesAttributes
     }
 
     /**
+     * Validate that an attribute has a minimum number of digits.
+     *
+     * @param  string  $attribute
+     * @param  mixed  $value
+     * @param  array<int, int|string>  $parameters
+     * @return bool
+     */
+    public function validateMinDigits($attribute, $value, $parameters)
+    {
+        $this->requireParameterCount(1, $parameters, 'min');
+
+        $length = strlen((string) $value);
+
+        return ! preg_match('/[^0-9]/', $value) && $length >= $parameters[0];
+    }
+
+    /**
+     * Validate that an attribute is missing.
+     *
+     * @param  string  $attribute
+     * @param  mixed  $value
+     * @param  array<int, int|string>  $parameters
+     * @return bool
+     */
+    public function validateMissing($attribute, $value, $parameters)
+    {
+        return ! Arr::has($this->data, $attribute);
+    }
+
+    /**
+     * Validate that an attribute is missing when another attribute has a given value.
+     *
+     * @param  string  $attribute
+     * @param  mixed  $value
+     * @param  array<int, int|string>  $parameters
+     * @return bool
+     */
+    public function validateMissingIf($attribute, $value, $parameters)
+    {
+        $this->requireParameterCount(2, $parameters, 'missing_if');
+
+        [$values, $other] = $this->parseDependentRuleParameters($parameters);
+
+        if (in_array($other, $values, is_bool($other) || is_null($other))) {
+            return $this->validateMissing($attribute, $value, $parameters);
+        }
+
+        return true;
+    }
+
+    /**
+     * Validate that an attribute is missing unless another attribute has a given value.
+     *
+     * @param  string  $attribute
+     * @param  mixed  $value
+     * @param  array<int, int|string>  $parameters
+     * @return bool
+     */
+    public function validateMissingUnless($attribute, $value, $parameters)
+    {
+        $this->requireParameterCount(2, $parameters, 'missing_unless');
+
+        [$values, $other] = $this->parseDependentRuleParameters($parameters);
+
+        if (! in_array($other, $values, is_bool($other) || is_null($other))) {
+            return $this->validateMissing($attribute, $value, $parameters);
+        }
+
+        return true;
+    }
+
+    /**
+     * Validate that an attribute is missing when any given attribute is present.
+     *
+     * @param  string  $attribute
+     * @param  mixed  $value
+     * @param  array<int, int|string>  $parameters
+     * @return bool
+     */
+    public function validateMissingWith($attribute, $value, $parameters)
+    {
+        $this->requireParameterCount(1, $parameters, 'missing_with');
+
+        return ! Arr::hasAny($this->data, $parameters);
+    }
+
+    /**
+     * Validate that an attribute is missing when all given attributes are present.
+     *
+     * @param  string  $attribute
+     * @param  mixed  $value
+     * @param  array<int, int|string>  $parameters
+     * @return bool
+     */
+    public function validateMissingWithAll($attribute, $value, $parameters)
+    {
+        $this->requireParameterCount(1, $parameters, 'missing_with');
+
+        return ! Arr::has($this->data, $parameters);
+    }
+
+    /**
      * Validate the value of an attribute is a multiple of a given value.
      *
      * @param  string  $attribute
@@ -1410,11 +1608,26 @@ trait ValidatesAttributes
             return false;
         }
 
-        if ((float) $parameters[0] === 0.0) {
-            return false;
-        }
+        try {
+            $numerator = BigDecimal::of($value);
+            $denominator = BigDecimal::of($parameters[0]);
 
-        return bcmod($value, $parameters[0], 16) === '0.0000000000000000';
+            if ($numerator->isZero() && $denominator->isZero()) {
+                return false;
+            }
+
+            if ($numerator->isZero()) {
+                return true;
+            }
+
+            if ($denominator->isZero()) {
+                return false;
+            }
+
+            return $numerator->remainder($denominator)->isZero();
+        } catch (BrickMathException $e) {
+            throw new MathException('An error occurred while handling the mulitple_of input values.', previous: $e);
+        }
     }
 
     /**
@@ -1552,7 +1765,26 @@ trait ValidatesAttributes
     }
 
     /**
-     * Validate that an attribute does not exist.
+     * Validate that an attribute exists when another attribute was "accepted".
+     *
+     * @param  string  $attribute
+     * @param  mixed  $value
+     * @param  mixed  $parameters
+     * @return bool
+     */
+    public function validateRequiredIfAccepted($attribute, $value, $parameters)
+    {
+        $this->requireParameterCount(1, $parameters, 'required_if_accepted');
+
+        if ($this->validateAccepted($parameters[0], $this->getValue($parameters[0]))) {
+            return $this->validateRequired($attribute, $value);
+        }
+
+        return true;
+    }
+
+    /**
+     * Validate that an attribute does not exist or is an empty string.
      *
      * @param  string  $attribute
      * @param  mixed  $value
@@ -1560,7 +1792,7 @@ trait ValidatesAttributes
      */
     public function validateProhibited($attribute, $value)
     {
-        return false;
+        return ! $this->validateRequired($attribute, $value);
     }
 
     /**
@@ -1615,7 +1847,15 @@ trait ValidatesAttributes
      */
     public function validateProhibits($attribute, $value, $parameters)
     {
-        return ! Arr::hasAny($this->data, $parameters);
+        if ($this->validateRequired($attribute, $value)) {
+            foreach ($parameters as $parameter) {
+                if ($this->validateRequired($parameter, Arr::get($this->data, $parameter))) {
+                    return false;
+                }
+            }
+        }
+
+        return true;
     }
 
     /**
@@ -1977,6 +2217,19 @@ trait ValidatesAttributes
     }
 
     /**
+     * Validate the attribute does not end with a given substring.
+     *
+     * @param  string  $attribute
+     * @param  mixed  $value
+     * @param  array<int, int|string>  $parameters
+     * @return bool
+     */
+    public function validateDoesntEndWith($attribute, $value, $parameters)
+    {
+        return ! Str::endsWith($value, $parameters);
+    }
+
+    /**
      * Validate that an attribute is a string.
      *
      * @param  string  $attribute
@@ -2037,6 +2290,18 @@ trait ValidatesAttributes
         $~ixu';
 
         return preg_match($pattern, $value) > 0;
+    }
+
+    /**
+     * Validate that an attribute is a valid ULID.
+     *
+     * @param  string  $attribute
+     * @param  mixed  $value
+     * @return bool
+     */
+    public function validateUlid($attribute, $value)
+    {
+        return Str::isUlid($value);
     }
 
     /**

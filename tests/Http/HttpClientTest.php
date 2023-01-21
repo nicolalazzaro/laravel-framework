@@ -78,6 +78,17 @@ class HttpClientTest extends TestCase
         $this->assertTrue($response->forbidden());
     }
 
+    public function testNotFoundResponse()
+    {
+        $this->factory->fake([
+            'laravel.com' => $this->factory::response('', 404),
+        ]);
+
+        $response = $this->factory->post('http://laravel.com');
+
+        $this->assertTrue($response->notFound());
+    }
+
     public function testResponseBodyCasting()
     {
         $this->factory->fake([
@@ -478,6 +489,7 @@ class HttpClientTest extends TestCase
 
         $response = $this->factory->get('https://example.com');
         $this->assertSame(['fact' => 'Cats are great!'], $response->json());
+        $this->assertSame('application/json', $response->header('Content-Type'));
         $this->assertSame(200, $response->status());
 
         $response = $this->factory->get('https://example.com');
@@ -1138,6 +1150,31 @@ class HttpClientTest extends TestCase
         $this->assertSame(500, $responses['test500']->status());
     }
 
+    public function testMiddlewareRunsInPool()
+    {
+        $this->factory->fake(function (Request $request) {
+            return $this->factory->response('Fake');
+        });
+
+        $history = [];
+
+        $middleware = Middleware::history($history);
+
+        $responses = $this->factory->pool(fn (Pool $pool) => [
+            $pool->withMiddleware($middleware)->post('https://example.com', ['hyped-for' => 'laravel-movie']),
+        ]);
+
+        $response = $responses[0];
+
+        $this->assertSame('Fake', $response->body());
+
+        $this->assertCount(1, $history);
+
+        $this->assertSame('Fake', tap($history[0]['response']->getBody())->rewind()->getContents());
+
+        $this->assertSame(['hyped-for' => 'laravel-movie'], json_decode(tap($history[0]['request']->getBody())->rewind()->getContents(), true));
+    }
+
     public function testTheRequestSendingAndResponseReceivedEventsAreFiredWhenARequestIsSent()
     {
         $events = m::mock(Dispatcher::class);
@@ -1469,6 +1506,63 @@ class HttpClientTest extends TestCase
         $this->assertSame(403, $response->status());
     }
 
+    public function testRequestExceptionIsThrownIfTheThrowIfClosureOnThePendingRequestReturnsTrue()
+    {
+        $this->factory->fake([
+            '*' => $this->factory->response(['error'], 403),
+        ]);
+
+        $exception = null;
+
+        $hitThrowCallback = false;
+
+        try {
+            $this->factory
+                ->throwIf(function ($response) {
+                    $this->assertInstanceOf(Response::class, $response);
+                    $this->assertSame(403, $response->status());
+
+                    return true;
+                }, function ($response, $e) use (&$hitThrowCallback) {
+                    $this->assertInstanceOf(Response::class, $response);
+                    $this->assertSame(403, $response->status());
+
+                    $this->assertInstanceOf(RequestException::class, $e);
+                    $hitThrowCallback = true;
+                })
+                ->get('http://foo.com/get');
+        } catch (RequestException $e) {
+            $exception = $e;
+        }
+
+        $this->assertNotNull($exception);
+        $this->assertInstanceOf(RequestException::class, $exception);
+        $this->assertTrue($hitThrowCallback);
+    }
+
+    public function testRequestExceptionIsNotThrownIfTheThrowIfClosureOnThePendingRequestReturnsFalse()
+    {
+        $this->factory->fake([
+            '*' => $this->factory->response(['error'], 403),
+        ]);
+
+        $hitThrowCallback = false;
+
+        $response = $this->factory
+            ->throwIf(function ($response) {
+                $this->assertInstanceOf(Response::class, $response);
+                $this->assertSame(403, $response->status());
+
+                return false;
+            }, function ($response, $e) use (&$hitThrowCallback) {
+                $hitThrowCallback = true;
+            })
+            ->get('http://foo.com/get');
+
+        $this->assertSame(403, $response->status());
+        $this->assertFalse($hitThrowCallback);
+    }
+
     public function testRequestExceptionIsThrownWithCallbackIfThePendingRequestIsSetToThrowOnFailure()
     {
         $this->factory->fake([
@@ -1575,6 +1669,273 @@ class HttpClientTest extends TestCase
         $response = $this->factory->get('http://foo.com/api')->throwIf(false);
 
         $this->assertSame('{"result":{"foo":"bar"}}', $response->body());
+    }
+
+    public function testRequestExceptionIsThrowIfConditionClosureIsSatisfied()
+    {
+        $this->factory->fake([
+            '*' => $this->factory::response('', 400),
+        ]);
+
+        $exception = null;
+
+        $hitThrowCallback = false;
+
+        try {
+            $this->factory->get('http://foo.com/api')->throwIf(function ($response) {
+                $this->assertSame(400, $response->status());
+
+                return true;
+            }, function ($response, $e) use (&$hitThrowCallback) {
+                $this->assertSame(400, $response->status());
+                $this->assertInstanceOf(RequestException::class, $e);
+
+                $hitThrowCallback = true;
+            });
+        } catch (RequestException $e) {
+            $exception = $e;
+        }
+
+        $this->assertNotNull($exception);
+        $this->assertInstanceOf(RequestException::class, $exception);
+        $this->assertTrue($hitThrowCallback);
+    }
+
+    public function testRequestExceptionIsNotThrownIfConditionClosureIsNotSatisfied()
+    {
+        $this->factory->fake([
+            '*' => $this->factory::response(['result' => ['foo' => 'bar']], 400),
+        ]);
+
+        $hitThrowCallback = false;
+
+        $response = $this->factory->get('http://foo.com/api')->throwIf(function ($response) {
+            $this->assertSame(400, $response->status());
+
+            return false;
+        }, function ($response, $e) use (&$hitThrowCallback) {
+            $hitThrowCallback = true;
+        });
+
+        $this->assertSame('{"result":{"foo":"bar"}}', $response->body());
+        $this->assertFalse($hitThrowCallback);
+    }
+
+    public function testRequestExceptionIsThrownIfStatusCodeIsSatisfied()
+    {
+        $this->factory->fake([
+            '*' => $this->factory::response('', 400),
+        ]);
+
+        $exception = null;
+
+        try {
+            $this->factory->get('http://foo.com/api')->throwIfStatus(400);
+        } catch (RequestException $e) {
+            $exception = $e;
+        }
+
+        $this->assertNotNull($exception);
+        $this->assertInstanceOf(RequestException::class, $exception);
+    }
+
+    public function testRequestExceptionIsThrownIfStatusCodeIsSatisfiedWithClosure()
+    {
+        $this->factory->fake([
+            '*' => $this->factory::response('', 400),
+        ]);
+
+        $exception = null;
+
+        try {
+            $this->factory->get('http://foo.com/api')->throwIfStatus(fn ($status) => $status === 400);
+        } catch (RequestException $e) {
+            $exception = $e;
+        }
+
+        $this->assertNotNull($exception);
+        $this->assertInstanceOf(RequestException::class, $exception);
+    }
+
+    public function testRequestExceptionIsNotThrownIfStatusCodeIsNotSatisfied()
+    {
+        $this->factory->fake([
+            '*' => $this->factory::response('', 400),
+        ]);
+
+        $exception = null;
+
+        try {
+            $this->factory->get('http://foo.com/api')->throwIfStatus(500);
+        } catch (RequestException $e) {
+            $exception = $e;
+        }
+
+        $this->assertNull($exception);
+    }
+
+    public function testRequestExceptionIsThrownUnlessStatusCodeIsSatisfied()
+    {
+        $this->factory->fake([
+            'http://foo.com/api/400' => $this->factory::response('', 400),
+            'http://foo.com/api/408' => $this->factory::response('', 408),
+            'http://foo.com/api/500' => $this->factory::response('', 500),
+        ]);
+
+        $exception = null;
+
+        try {
+            $this->factory->get('http://foo.com/api/400')->throwUnlessStatus(500);
+        } catch (RequestException $e) {
+            $exception = $e;
+        }
+
+        $this->assertNotNull($exception);
+        $this->assertInstanceOf(RequestException::class, $exception);
+
+        $exception = null;
+
+        $this->factory->fake([
+            'http://foo.com/api/400' => $this->factory::response('', 400),
+            'http://foo.com/api/408' => $this->factory::response('', 408),
+            'http://foo.com/api/500' => $this->factory::response('', 500),
+        ]);
+
+        $exception = null;
+
+        try {
+            $this->factory->get('http://foo.com/api/400')->throwUnlessStatus(fn ($status) => $status === 500);
+        } catch (RequestException $e) {
+            $exception = $e;
+        }
+
+        $this->assertNotNull($exception);
+        $this->assertInstanceOf(RequestException::class, $exception);
+
+        $exception = null;
+
+        try {
+            $this->factory->get('http://foo.com/api/408')->throwUnlessStatus(500);
+        } catch (RequestException $e) {
+            $exception = $e;
+        }
+
+        $this->assertNotNull($exception);
+        $this->assertInstanceOf(RequestException::class, $exception);
+
+        $exception = null;
+
+        try {
+            $this->factory->get('http://foo.com/api/500')->throwUnlessStatus(500);
+        } catch (RequestException $e) {
+            $exception = $e;
+        }
+
+        $this->assertNull($exception);
+    }
+
+    public function testRequestExceptionIsThrownIfIsClientError()
+    {
+        $this->factory->fake([
+            'http://foo.com/api/400' => $this->factory::response('', 400),
+            'http://foo.com/api/408' => $this->factory::response('', 408),
+            'http://foo.com/api/500' => $this->factory::response('', 500),
+            'http://foo.com/api/504' => $this->factory::response('', 504),
+        ]);
+
+        $exception = null;
+
+        try {
+            $this->factory->get('http://foo.com/api/400')->throwIfClientError();
+        } catch (RequestException $e) {
+            $exception = $e;
+        }
+
+        $this->assertNotNull($exception);
+        $this->assertInstanceOf(RequestException::class, $exception);
+
+        $exception = null;
+
+        try {
+            $this->factory->get('http://foo.com/api/408')->throwIfClientError();
+        } catch (RequestException $e) {
+            $exception = $e;
+        }
+
+        $this->assertNotNull($exception);
+        $this->assertInstanceOf(RequestException::class, $exception);
+
+        $exception = null;
+
+        try {
+            $this->factory->get('http://foo.com/api/500')->throwIfClientError();
+        } catch (RequestException $e) {
+            $exception = $e;
+        }
+
+        $this->assertNull($exception);
+
+        $exception = null;
+
+        try {
+            $this->factory->get('http://foo.com/api/504')->throwIfClientError();
+        } catch (RequestException $e) {
+            $exception = $e;
+        }
+
+        $this->assertNull($exception);
+    }
+
+    public function testRequestExceptionIsThrownIfIsServerError()
+    {
+        $this->factory->fake([
+            'http://foo.com/api/400' => $this->factory::response('', 400),
+            'http://foo.com/api/408' => $this->factory::response('', 408),
+            'http://foo.com/api/500' => $this->factory::response('', 500),
+            'http://foo.com/api/504' => $this->factory::response('', 504),
+        ]);
+
+        $exception = null;
+
+        try {
+            $this->factory->get('http://foo.com/api/400')->throwIfServerError();
+        } catch (RequestException $e) {
+            $exception = $e;
+        }
+
+        $this->assertNull($exception);
+
+        $exception = null;
+
+        try {
+            $this->factory->get('http://foo.com/api/408')->throwIfServerError();
+        } catch (RequestException $e) {
+            $exception = $e;
+        }
+
+        $this->assertNull($exception);
+
+        $exception = null;
+
+        try {
+            $this->factory->get('http://foo.com/api/500')->throwIfServerError();
+        } catch (RequestException $e) {
+            $exception = $e;
+        }
+
+        $this->assertNotNull($exception);
+        $this->assertInstanceOf(RequestException::class, $exception);
+
+        $exception = null;
+
+        try {
+            $this->factory->get('http://foo.com/api/504')->throwIfServerError();
+        } catch (RequestException $e) {
+            $exception = $e;
+        }
+
+        $this->assertNotNull($exception);
+        $this->assertInstanceOf(RequestException::class, $exception);
     }
 
     public function testItCanEnforceFaking()

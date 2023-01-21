@@ -521,4 +521,63 @@ class FilesystemAdapterTest extends TestCase
 
         $this->assertSame($filesystemAdapter->files(), ['body.txt', 'existing.txt', 'file.txt', 'file1.txt']);
     }
+
+    public function testProvidesTemporaryUrls()
+    {
+        $localAdapter = new class($this->tempDir) extends LocalFilesystemAdapter
+        {
+            public function getTemporaryUrl($path, Carbon $expiration, $options): string
+            {
+                return $path.$expiration->toString().implode('', $options);
+            }
+        };
+        $filesystemAdapter = new FilesystemAdapter($this->filesystem, $localAdapter);
+
+        $this->assertTrue($filesystemAdapter->providesTemporaryUrls());
+    }
+
+    public function testProvidesTemporaryUrlsWithCustomCallback()
+    {
+        $filesystemAdapter = new FilesystemAdapter($this->filesystem, $this->adapter);
+
+        $filesystemAdapter->buildTemporaryUrlsUsing(function ($path, Carbon $expiration, $options) {
+            return $path.$expiration->toString().implode('', $options);
+        });
+
+        $this->assertTrue($filesystemAdapter->providesTemporaryUrls());
+    }
+
+    public function testProvidesTemporaryUrlsForS3Adapter()
+    {
+        $filesystem = new FilesystemManager(new Application);
+        $filesystemAdapter = $filesystem->createS3Driver([
+            'region' => 'us-west-1',
+            'bucket' => 'laravel',
+        ]);
+
+        $this->assertTrue($filesystemAdapter->providesTemporaryUrls());
+    }
+
+    public function testProvidesTemporaryUrlsForAdapterWithoutTemporaryUrlSupport()
+    {
+        $filesystemAdapter = new FilesystemAdapter($this->filesystem, $this->adapter);
+
+        $this->assertFalse($filesystemAdapter->providesTemporaryUrls());
+    }
+
+    public function testPrefixesUrls()
+    {
+        $filesystemAdapter = new FilesystemAdapter($this->filesystem, $this->adapter, ['url' => 'https://example.org/', 'prefix' => 'images']);
+
+        $this->assertEquals('https://example.org/images/picture.jpeg', $filesystemAdapter->url('picture.jpeg'));
+    }
+
+    public function testGetChecksum()
+    {
+        $filesystemAdapter = new FilesystemAdapter($this->filesystem, $this->adapter);
+        $filesystemAdapter->write('path.txt', 'contents of file');
+
+        $this->assertEquals('730bed78bccf58c2cfe44c29b71e5e6b', $filesystemAdapter->checksum('path.txt'));
+        $this->assertEquals('a5c3556d', $filesystemAdapter->checksum('path.txt', ['checksum_algo' => 'crc32']));
+    }
 }

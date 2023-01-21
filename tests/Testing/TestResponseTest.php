@@ -2,10 +2,10 @@
 
 namespace Illuminate\Tests\Testing;
 
-use Exception;
 use Illuminate\Container\Container;
 use Illuminate\Contracts\View\View;
 use Illuminate\Cookie\CookieValuePrefix;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Encryption\Encrypter;
 use Illuminate\Filesystem\Filesystem;
@@ -28,6 +28,7 @@ use PHPUnit\Framework\ExpectationFailedException;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\Cookie;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class TestResponseTest extends TestCase
 {
@@ -116,7 +117,7 @@ class TestResponseTest extends TestCase
 
     public function testAssertViewHasEloquentCollection()
     {
-        $collection = new \Illuminate\Database\Eloquent\Collection([
+        $collection = new EloquentCollection([
             new TestModel(['id' => 1]),
             new TestModel(['id' => 2]),
             new TestModel(['id' => 3]),
@@ -132,7 +133,7 @@ class TestResponseTest extends TestCase
 
     public function testAssertViewHasEloquentCollectionRespectsOrder()
     {
-        $collection = new \Illuminate\Database\Eloquent\Collection([
+        $collection = new EloquentCollection([
             new TestModel(['id' => 3]),
             new TestModel(['id' => 2]),
             new TestModel(['id' => 1]),
@@ -150,7 +151,7 @@ class TestResponseTest extends TestCase
 
     public function testAssertViewHasEloquentCollectionRespectsType()
     {
-        $actual = new \Illuminate\Database\Eloquent\Collection([
+        $actual = new EloquentCollection([
             new TestModel(['id' => 1]),
             new TestModel(['id' => 2]),
         ]);
@@ -160,7 +161,7 @@ class TestResponseTest extends TestCase
             'gatherData' => ['foos' => $actual],
         ]);
 
-        $expected = new \Illuminate\Database\Eloquent\Collection([
+        $expected = new EloquentCollection([
             new AnotherTestModel(['id' => 1]),
             new AnotherTestModel(['id' => 2]),
         ]);
@@ -172,7 +173,7 @@ class TestResponseTest extends TestCase
 
     public function testAssertViewHasEloquentCollectionRespectsSize()
     {
-        $actual = new \Illuminate\Database\Eloquent\Collection([
+        $actual = new EloquentCollection([
             new TestModel(['id' => 1]),
             new TestModel(['id' => 2]),
         ]);
@@ -209,6 +210,57 @@ class TestResponseTest extends TestCase
         ]);
 
         $response->assertViewMissing('foo.baz');
+    }
+
+    public function testAssertContent()
+    {
+        $response = $this->makeMockResponse([
+            'render' => 'expected response data',
+        ]);
+
+        $response->assertContent('expected response data');
+
+        try {
+            $response->assertContent('expected');
+            $this->fail('xxxx');
+        } catch (AssertionFailedError $e) {
+            $this->assertSame('Failed asserting that two strings are identical.', $e->getMessage());
+        }
+
+        try {
+            $response->assertContent('expected response data with extra');
+            $this->fail('xxxx');
+        } catch (AssertionFailedError $e) {
+            $this->assertSame('Failed asserting that two strings are identical.', $e->getMessage());
+        }
+    }
+
+    public function testAssertStreamedContent()
+    {
+        $response = TestResponse::fromBaseResponse(
+            new StreamedResponse(function () {
+                $stream = fopen('php://memory', 'r+');
+                fwrite($stream, 'expected response data');
+                rewind($stream);
+                fpassthru($stream);
+            })
+        );
+
+        $response->assertStreamedContent('expected response data');
+
+        try {
+            $response->assertStreamedContent('expected');
+            $this->fail('xxxx');
+        } catch (AssertionFailedError $e) {
+            $this->assertSame('Failed asserting that two strings are identical.', $e->getMessage());
+        }
+
+        try {
+            $response->assertStreamedContent('expected response data with extra');
+            $this->fail('xxxx');
+        } catch (AssertionFailedError $e) {
+            $this->assertSame('Failed asserting that two strings are identical.', $e->getMessage());
+        }
     }
 
     public function testAssertSee()
@@ -557,6 +609,18 @@ class TestResponseTest extends TestCase
         $response->assertUnprocessable();
     }
 
+    public function testAssertServerError()
+    {
+        $statusCode = 500;
+
+        $baseResponse = tap(new Response, function ($response) use ($statusCode) {
+            $response->setStatusCode($statusCode);
+        });
+
+        $response = TestResponse::fromBaseResponse($baseResponse);
+        $response->assertServerError();
+    }
+
     public function testAssertNoContentAsserts204StatusCodeByDefault()
     {
         $statusCode = 500;
@@ -620,90 +684,6 @@ class TestResponseTest extends TestCase
 
         $response = TestResponse::fromBaseResponse($baseResponse);
         $response->assertStatus($expectedStatusCode);
-    }
-
-    public function testAssertStatusShowsExceptionOnUnexpected500()
-    {
-        $statusCode = 500;
-        $expectedStatusCode = 200;
-
-        $this->expectException(AssertionFailedError::class);
-
-        $this->expectExceptionMessage('Test exception message');
-
-        $baseResponse = tap(new Response, function ($response) use ($statusCode) {
-            $response->setStatusCode($statusCode);
-        });
-        $exceptions = collect([new Exception('Test exception message')]);
-
-        $response = TestResponse::fromBaseResponse($baseResponse)
-            ->withExceptions($exceptions);
-        $response->assertStatus($expectedStatusCode);
-    }
-
-    public function testAssertStatusShowsErrorsOnUnexpectedErrorRedirect()
-    {
-        $statusCode = 302;
-        $expectedStatusCode = 200;
-
-        $this->expectException(AssertionFailedError::class);
-
-        $this->expectExceptionMessage('The first name field is required.');
-
-        $baseResponse = tap(new RedirectResponse('/', $statusCode), function ($response) {
-            $response->setSession(new Store('test-session', new ArraySessionHandler(1)));
-            $response->withErrors([
-                'first_name' => 'The first name field is required.',
-                'last_name' => 'The last name field is required.',
-            ]);
-        });
-
-        $response = TestResponse::fromBaseResponse($baseResponse);
-        $response->assertStatus($expectedStatusCode);
-    }
-
-    public function testAssertStatusShowsJsonErrorsOnUnexpected422()
-    {
-        $statusCode = 422;
-        $expectedStatusCode = 200;
-
-        $this->expectException(AssertionFailedError::class);
-
-        $this->expectExceptionMessage('"The first name field is required."');
-
-        $baseResponse = new Response(
-            [
-                'message' => 'The given data was invalid.',
-                'errors' => [
-                    'first_name' => 'The first name field is required.',
-                    'last_name' => 'The last name field is required.',
-                ],
-            ],
-            $statusCode
-        );
-
-        $response = TestResponse::fromBaseResponse($baseResponse);
-        $response->assertStatus($expectedStatusCode);
-    }
-
-    public function testAssertStatusWhenJsonIsFalse()
-    {
-        $baseResponse = new Response('false', 200, ['Content-Type' => 'application/json']);
-
-        $response = TestResponse::fromBaseResponse($baseResponse);
-        $response->assertStatus(200);
-    }
-
-    public function testAssertStatusWhenJsonIsEncoded()
-    {
-        $baseResponse = tap(new Response, function ($response) {
-            $response->header('Content-Type', 'application/json');
-            $response->header('Content-Encoding', 'gzip');
-            $response->setContent('b"x£½V*.I,)-V▓R╩¤V¬\x05\x00+ü\x059"');
-        });
-
-        $response = TestResponse::fromBaseResponse($baseResponse);
-        $response->assertStatus(200);
     }
 
     public function testAssertHeader()
@@ -945,6 +925,16 @@ class TestResponseTest extends TestCase
         $this->expectException(AssertionFailedError::class);
 
         $response = TestResponse::fromBaseResponse(new Response(new JsonSerializableSingleResourceWithIntegersStub));
+
+        $response->assertJsonFragment(['id' => 1]);
+    }
+
+    public function testAssertJsonFragmentUnicodeCanFail()
+    {
+        $this->expectException(AssertionFailedError::class);
+        $this->expectExceptionMessageMatches('/Привет|Мир/');
+
+        $response = TestResponse::fromBaseResponse(new Response(new JsonSerializableSingleResourceWithUnicodeStub));
 
         $response->assertJsonFragment(['id' => 1]);
     }
@@ -1650,9 +1640,6 @@ class TestResponseTest extends TestCase
         );
     }
 
-    /**
-     * @group 1
-     */
     public function testResponseCanBeReturnedAsCollection()
     {
         $response = TestResponse::fromBaseResponse(new Response(new JsonSerializableMixedResourcesStub));
@@ -1880,8 +1867,6 @@ class TestResponseTest extends TestCase
 
     public function testAssertSessionHasNoErrors()
     {
-        $this->expectException(AssertionFailedError::class);
-
         app()->instance('session.store', $store = new Store('test-session', new ArraySessionHandler(1)));
 
         $store->put('errors', $errorBag = new ViewErrorBag);
@@ -1892,9 +1877,20 @@ class TestResponseTest extends TestCase
             ],
         ]));
 
+        $errorBag->put('some-other-bag', new MessageBag([
+            'bar' => [
+                'bar is required',
+            ],
+        ]));
+
         $response = TestResponse::fromBaseResponse(new Response());
 
-        $response->assertSessionHasNoErrors();
+        try {
+            $response->assertSessionHasNoErrors();
+        } catch (AssertionFailedError $e) {
+            $this->assertStringContainsString('foo is required', $e->getMessage());
+            $this->assertStringContainsString('bar is required', $e->getMessage());
+        }
     }
 
     public function testAssertSessionHas()
@@ -2034,6 +2030,18 @@ class JsonSerializableSingleResourceWithIntegersStub implements JsonSerializable
             ['id' => 10, 'foo' => 'bar'],
             ['id' => 20, 'foo' => 'bar'],
             ['id' => 30, 'foo' => 'bar'],
+        ];
+    }
+}
+
+class JsonSerializableSingleResourceWithUnicodeStub implements JsonSerializable
+{
+    public function jsonSerialize(): array
+    {
+        return [
+            ['id' => 10, 'foo' => 'bar'],
+            ['id' => 20, 'foo' => 'Привет'],
+            ['id' => 30, 'foo' => 'Мир'],
         ];
     }
 }

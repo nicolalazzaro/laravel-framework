@@ -28,6 +28,20 @@ class Response implements ArrayAccess
     protected $decoded;
 
     /**
+     * The request cookies.
+     *
+     * @var \GuzzleHttp\Cookie\CookieJar
+     */
+    public $cookies;
+
+    /**
+     * The transfer stats for the request.
+     *
+     * @var \GuzzleHttp\TransferStats|null
+     */
+    public $transferStats;
+
+    /**
      * Create a new response instance.
      *
      * @param  \Psr\Http\Message\MessageInterface  $response
@@ -191,6 +205,16 @@ class Response implements ArrayAccess
     }
 
     /**
+     * Determine if the response was a 404 "Not Found" response.
+     *
+     * @return bool
+     */
+    public function notFound()
+    {
+        return $this->status() === 404;
+    }
+
+    /**
      * Determine if the response indicates a client or server error occurred.
      *
      * @return bool
@@ -315,14 +339,75 @@ class Response implements ArrayAccess
     /**
      * Throw an exception if a server or client error occurred and the given condition evaluates to true.
      *
-     * @param  bool  $condition
+     * @param  \Closure|bool  $condition
+     * @param  \Closure|null  $throwCallback
      * @return $this
      *
      * @throws \Illuminate\Http\Client\RequestException
      */
     public function throwIf($condition)
     {
-        return $condition ? $this->throw() : $this;
+        return value($condition, $this) ? $this->throw(func_get_args()[1] ?? null) : $this;
+    }
+
+    /**
+     * Throw an exception if the response status code matches the given code.
+     *
+     * @param  callable|int  $statusCode
+     * @return $this
+     *
+     * @throws \Illuminate\Http\Client\RequestException
+     */
+    public function throwIfStatus($statusCode)
+    {
+        if (is_callable($statusCode) &&
+            $statusCode($this->status(), $this)) {
+            return $this->throw();
+        }
+
+        return $this->status() === $statusCode ? $this->throw() : $this;
+    }
+
+    /**
+     * Throw an exception unless the response status code matches the given code.
+     *
+     * @param  callable|int  $statusCode
+     * @return $this
+     *
+     * @throws \Illuminate\Http\Client\RequestException
+     */
+    public function throwUnlessStatus($statusCode)
+    {
+        if (is_callable($statusCode) &&
+            ! $statusCode($this->status(), $this)) {
+            return $this->throw();
+        }
+
+        return $this->status() === $statusCode ? $this : $this->throw();
+    }
+
+    /**
+     * Throw an exception if the response status code is a 4xx level code.
+     *
+     * @return $this
+     *
+     * @throws \Illuminate\Http\Client\RequestException
+     */
+    public function throwIfClientError()
+    {
+        return $this->clientError() ? $this->throw() : $this;
+    }
+
+    /**
+     * Throw an exception if the response status code is a 5xx level code.
+     *
+     * @return $this
+     *
+     * @throws \Illuminate\Http\Client\RequestException
+     */
+    public function throwIfServerError()
+    {
+        return $this->serverError() ? $this->throw() : $this;
     }
 
     /**
